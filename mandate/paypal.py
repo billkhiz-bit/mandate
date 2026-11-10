@@ -33,6 +33,8 @@ class PayPal(Protocol):
     def payout(self, action_id: str, email: str, amount: float, currency: str,
                note: str, subject: str) -> dict: ...
 
+    def payout_status(self, batch_id: str) -> str: ...
+
     def refund(self, action_id: str, capture_id: str, amount: float, currency: str,
                note: str) -> dict: ...
 
@@ -117,6 +119,18 @@ class LivePayPal:
         header = out.get("batch_header", {})
         return {"id": header.get("payout_batch_id", ""), "status": header.get("batch_status", "")}
 
+    def payout_status(self, batch_id: str) -> str:
+        """A new batch is always PENDING; the item's transaction_status is the real
+        outcome (SUCCESS, UNCLAIMED for an email with no PayPal account, FAILED...)."""
+        out = self._call("GET", f"/v1/payments/payouts/{batch_id}")
+        items = out.get("items") or []
+        if items and items[0].get("transaction_status"):
+            return str(items[0]["transaction_status"])
+        # No item yet: a batch still in progress says so, but a batch SUCCESS only means the
+        # batch was processed, not that the payee got paid, so report "unknown" ("") instead.
+        batch = str(out.get("batch_header", {}).get("batch_status", ""))
+        return batch if batch in ("PENDING", "PROCESSING", "NEW") else ""
+
     def refund(self, action_id, capture_id, amount, currency, note) -> dict:
         body: dict = {"amount": {"value": _money(amount), "currency_code": currency}}
         if note.strip():  # PayPal rejects an empty note_to_payer
@@ -198,6 +212,9 @@ class FakePayPal:
     def payout(self, action_id, email, amount, currency, note, subject) -> dict:
         return {"id": self._record("payout", action_id=action_id, email=email, amount=amount,
                                    currency=currency), "status": "SUCCESS"}
+
+    def payout_status(self, batch_id: str) -> str:
+        return "SUCCESS"
 
     def refund(self, action_id, capture_id, amount, currency, note) -> dict:
         return {"id": self._record("refund", action_id=action_id, capture_id=capture_id,

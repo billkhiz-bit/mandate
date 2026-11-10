@@ -110,7 +110,8 @@ const activityGrid = agGrid.createGrid($("activity-grid"), {
   columnDefs: [
     { headerName: "Time", field: "time", width: 76 },
     { headerName: "Done", colId: "done", width: 100,
-      valueGetter: (p) => (p.data.outcome === "Declined" ? "Declined" : DONE_VERB[p.data.kind] ?? p.data.kind) },
+      valueGetter: (p) => (["Declined", "Failed"].includes(p.data.outcome) ? p.data.outcome
+        : DONE_VERB[p.data.kind] ?? p.data.kind) },
 
     { headerName: "To", field: "payee", flex: 1, minWidth: 130 },
     { headerName: "Amount", field: "amount", width: 168, cellRenderer: amountCell },
@@ -254,18 +255,66 @@ async function load() {
   try {
     state = await api("/api/state");
     render();
+    schedulePayoutRefresh();  // a reload picks up payouts still waiting on PayPal
   } catch (err) {
     toast(err.message, true);
   }
 }
 
+function markReading() {
+  // Show which item the AI is reading now: the first one still new.
+  const index = state.inbox.findIndex((i) => (i.status || "new") === "new");
+  const pill = document.querySelectorAll("#inbox .item .pill")[index];
+  if (pill) { pill.className = "pill reading"; pill.textContent = "Reading…"; }
+}
+
+/* PayPal reports a new payout as PENDING. Ask again, backing off (5 s, 10 s, 20 s...),
+   while any payout is still interim, and stop after a few minutes. */
+const INTERIM = new Set(["", "PENDING", "PROCESSING", "NEW", "ONHOLD", "UNCLAIMED"]);
+let refreshTimer = null;
+const hasInterimPayouts = () => state && state.paypal === "sandbox" && state.activity.some(
+  (a) => a.kind === "payout" && a.outcome === "Done" && a.paypal_id && INTERIM.has(a.paypal_status || ""));
+
+function schedulePayoutRefresh(delay = 5000) {
+  clearTimeout(refreshTimer);
+  if (!hasInterimPayouts() || delay > 160000) return;
+  refreshTimer = setTimeout(async () => {
+    try {
+      const data = await api("/api/refresh-payouts", {});
+      if (data.changed) { state = data.state; render(); }
+    } catch { /* try again on the next tick */ }
+    schedulePayoutRefresh(delay * 2);
+  }, delay);
+}
+
 $("run").addEventListener("click", (e) => withBusy(e.currentTarget, "Reading…", async () => {
-  const data = await api("/api/run", {});
-  state = data.state;
-  render();
-  const { done, waiting } = data.counts;
-  toast(done + waiting === 0 ? "Nothing new in the inbox."
-    : `${plural(done, "action", "actions")} done within the mandate, ${waiting} waiting for you.`);
+  // One item per request, so each inbox item visibly turns Done or Waiting as it is decided.
+  // The server, not this page's copy, says how many are left: the page may be out of date.
+  const button = e.currentTarget;
+  const total = { done: 0, waiting: 0, nothing: 0 };
+  let processed = 0;
+  let remaining = null;
+  try {
+    do {
+      button.textContent = remaining === null ? "Reading…" : `Reading ${processed + 1} of ${processed + remaining}…`;
+      if (state) markReading();
+      const data = await api("/api/run", { limit: 1 });
+      state = data.state;
+      render();
+      Object.keys(total).forEach((k) => { total[k] += data.counts[k]; });
+      const moved = data.counts.done + data.counts.waiting + data.counts.nothing;
+      processed += moved;
+      remaining = data.remaining;
+      if (!moved) break;  // nothing moved: stop rather than loop
+    } while (remaining > 0);
+  } catch (err) {
+    if (processed) err.message += ` (${plural(processed, "item was", "items were")} handled before this.)`;
+    throw err;
+  } finally {
+    schedulePayoutRefresh();
+  }
+  toast(total.done + total.waiting === 0 ? "Nothing new in the inbox."
+    : `${plural(total.done, "action", "actions")} done within the mandate, ${total.waiting} waiting for you.`);
 }));
 
 $("approve").addEventListener("click", (e) => withBusy(e.currentTarget, "Sending…", async () => {
@@ -276,6 +325,7 @@ $("approve").addEventListener("click", (e) => withBusy(e.currentTarget, "Sending
   render();
   const a = data.entry;
   toast(`${DONE_VERB[a.kind]} ${a.payee}${a.kind === "reminder" ? "" : ` ${money(a.amount, a.currency)}`}. PayPal ${a.paypal_id}.`);
+  schedulePayoutRefresh();
 }));
 
 $("decline").addEventListener("click", (e) => withBusy(e.currentTarget, "Declining…", async () => {

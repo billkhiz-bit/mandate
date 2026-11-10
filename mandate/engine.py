@@ -19,6 +19,10 @@ from .store import Store
 from .vat import Client, treatment_for
 
 INVOICE_TERMS_DAYS = 14
+# Payout item statuses (PayPal Payouts v1). UNCLAIMED is still interim: after 30 days
+# PayPal returns unclaimed money, so it is checked until it settles.
+PAYOUT_INTERIM = {"", "PENDING", "PROCESSING", "NEW", "ONHOLD", "UNCLAIMED"}
+PAYOUT_FAILED = {"FAILED", "RETURNED", "BLOCKED", "DENIED", "REFUNDED", "REVERSED"}
 
 
 class Engine:
@@ -40,14 +44,58 @@ class Engine:
         return Mandate.from_dict(self.s["mandate"])
 
     # -- the inbox ---------------------------------------------------------
-    def run_inbox(self) -> dict:
+    def run_inbox(self, limit: Optional[int] = None) -> dict:
+        """Process new inbox items in order; `limit` lets the page show them one at a time."""
         counts = {"done": 0, "waiting": 0, "nothing": 0}
         for event in self.s["inbox"]:
             if event.get("status", "new") != "new":
                 continue
+            if limit is not None and sum(counts.values()) >= limit:
+                break
             counts[self._process(event)] += 1
             self.store.save()
         return counts
+
+    def remaining(self) -> int:
+        return sum(1 for e in self.s["inbox"] if e.get("status", "new") == "new")
+
+    def refresh_payouts(self) -> int:
+        """Replace PayPal's interim status with each payout's real outcome. A payout that
+        failed or came back is undone in the records: the job is unpaid again, the payee's
+        count drops, the books get reversing lines, and it stops counting towards today's limit."""
+        changed = 0
+        for entry in self.s["activity"]:
+            if (entry["kind"] == "payout" and entry["outcome"] == "Done" and entry.get("paypal_id")
+                    and entry.get("paypal_status") in PAYOUT_INTERIM):
+                try:
+                    status = self.paypal.payout_status(entry["paypal_id"])
+                except PayPalError:
+                    continue  # try again next time; the payout itself already went
+                if not status or status == entry["paypal_status"]:
+                    continue
+                entry["paypal_status"] = status
+                if status in PAYOUT_FAILED:
+                    self._undo_payout(entry)
+                changed += 1
+        if changed:
+            self.store.save()
+        return changed
+
+    def _undo_payout(self, entry: dict) -> None:
+        s = self.s
+        entry["outcome"] = "Failed"
+        entry["summary"] = f"PayPal reports the payout {entry['paypal_status'].lower()}: the money did not arrive."
+        if job := s["jobs"].get(entry["reference"]):
+            job["paid"] = False
+        if payee := s["payees"].get(entry["email"].lower()):
+            payee["payouts"] = max(0, payee["payouts"] - 1)
+        lines = books.payout_lines(self.today().isoformat(), entry["reference"], entry["payee"],
+                                   entry["amount"], entry["currency"])
+        for line in lines:  # the original lines with debit and credit swapped
+            d = line.to_dict()
+            d["debit"], d["credit"] = d["credit"], d["debit"]
+            d["memo"] = f"Reversed: {d['memo']} ({entry['paypal_status'].lower()})"
+            s["journal"].append({"id": f"L{len(s['journal']) + 1:05d}", **d})
 
     def _process(self, event: dict) -> str:
         item = {k: v for k, v in event.items() if k not in ("demo_proposal", "status", "note")}

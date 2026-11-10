@@ -55,12 +55,15 @@ def make_handler(engine: Engine, port: int):
             return False
 
         def _body(self) -> dict:
-            if not self.headers.get("Content-Type", "").startswith("application/json"):
-                raise ValueError("Send JSON.")
             length = int(self.headers.get("Content-Length") or 0)
             if length < 0 or length > MAX_BODY:
+                self.close_connection = True  # the unread body can't be trusted on this connection
                 raise ValueError("Request too large." if length > 0 else "Bad Content-Length.")
+            # Read the body before any other check: answering with bytes still unread makes
+            # Windows abort the connection, and the client sees an error instead of the reply.
             raw = self.rfile.read(length) if length else b"{}"
+            if not self.headers.get("Content-Type", "").startswith("application/json"):
+                raise ValueError("Send JSON.")
             data = json.loads(raw.decode("utf-8") or "{}")
             if not isinstance(data, dict):
                 raise ValueError("Send a JSON object.")
@@ -111,8 +114,16 @@ def make_handler(engine: Engine, port: int):
                     return self._json(200, engine.compile(text))
                 with lock:
                     if path == "/api/run":
-                        counts = engine.run_inbox()
-                        return self._json(200, {"counts": counts, "state": self._state()})
+                        limit = body.get("limit")
+                        if limit is not None and (not isinstance(limit, int) or isinstance(limit, bool)
+                                                  or not 1 <= limit <= 100):
+                            return self._json(400, {"error": "limit must be a whole number from 1 to 100."})
+                        counts = engine.run_inbox(limit=limit)
+                        return self._json(200, {"counts": counts, "remaining": engine.remaining(),
+                                                "state": self._state()})
+                    if path == "/api/refresh-payouts":
+                        changed = engine.refresh_payouts()
+                        return self._json(200, {"changed": changed, "state": self._state()})
                     if path == "/api/approve":
                         entry = engine.approve(str(body.get("id", "")))
                         return self._json(200, {"entry": entry, "state": self._state()})

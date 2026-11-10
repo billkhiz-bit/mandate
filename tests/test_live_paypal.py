@@ -40,6 +40,10 @@ class FakePayPalServer:
         if self.fail_next:
             failure, self.fail_next = self.fail_next, None
             return httpx.Response(422, json=failure)
+        if request.method == "GET" and path.startswith("/v1/payments/payouts/"):
+            return httpx.Response(200, json={"batch_header": {"payout_batch_id": path.rsplit("/", 1)[-1],
+                                                              "batch_status": "SUCCESS"},
+                                             "items": [{"payout_item_id": "ITEM-1", "transaction_status": "UNCLAIMED"}]})
         if path == "/v1/payments/payouts":
             return httpx.Response(201, json={"batch_header": {"payout_batch_id": "BATCH-1", "batch_status": "PENDING"}})
         if path.startswith("/v2/payments/captures/") and path.endswith("/refund"):

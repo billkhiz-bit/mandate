@@ -45,7 +45,7 @@ Nothing reaches PayPal.
   remind), and Orders v2 to create the sample sales. Every money-moving call carries a PayPal-Request-Id
   derived from the action, so retries are idempotent.
 * The rules engine is a pure function with no model calls, so every decision can be traced and tested.
-  75 tests cover the rules, VAT treatment, double-entry books, the full inbox run, and every PayPal and Claude call against local fakes.
+  82 tests cover the rules, VAT treatment, double-entry books, the full inbox run, and every PayPal and Claude call against local fakes.
 * VAT and nominal codes come from uk-chart-of-accounts, my open-source library of the UK chart of accounts.
 
 ## Challenges I ran into

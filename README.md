@@ -79,7 +79,9 @@ tests.
    business account (the studio) and a sandbox personal account (the buyer).
 2. Copy `.env.example` to `.env` and fill in `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` and
    `ANTHROPIC_API_KEY`.
-3. `python app.py check` confirms the keys work.
+3. `python app.py check` confirms the keys work. With only `ANTHROPIC_API_KEY` set, `python app.py check-ai`
+   scores Claude's reading of the eight sample items against the expected answers (done or waiting, amounts,
+   references, risk flags) without touching PayPal or your records.
 4. `python app.py seed-sandbox` creates the two sample sales (approve each link while signed in as the
    sandbox **personal** account) and sends the overdue invoice from the sample books.
 5. `python app.py serve`, then **Read the inbox**. Payouts, refunds and invoices appear in your sandbox

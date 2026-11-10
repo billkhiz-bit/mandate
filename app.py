@@ -3,6 +3,7 @@
     python app.py serve            open the dashboard at http://127.0.0.1:8600
     python app.py run              process the inbox here in the terminal
     python app.py check            show which AI and which PayPal this machine will use
+    python app.py check-ai         score live Claude on the sample inbox (no PayPal, records untouched)
     python app.py seed-sandbox     put the sample sales and overdue invoice into your PayPal sandbox
     python app.py reset            start again from the sample inbox
 """
@@ -86,6 +87,33 @@ def cmd_check(args) -> None:
             print(f"        {exc}")
 
 
+def cmd_check_ai(args) -> None:
+    from mandate.brain import ClaudeBrain
+    from mandate.check_ai import score
+    from mandate.seed import FIRM
+
+    bedrock = os.environ.get("MANDATE_AI", "").lower() == "bedrock"
+    if not bedrock and not os.environ.get("ANTHROPIC_API_KEY"):
+        sys.exit("Put ANTHROPIC_API_KEY in .env first (or set MANDATE_AI=bedrock).")
+    brain = ClaudeBrain(FIRM, provider="bedrock" if bedrock else "anthropic")
+    print(f"Asking {brain.name} about the 8 sample inbox items. Nothing is sent to PayPal "
+          "and your records are not changed.\n")
+    rows = score(brain, date.today())
+    for r in rows:
+        mark = "PASS" if r["ok"] else "DIFF"
+        print(f"  {mark}  {r['id']}  {r['subject'][:40]:<40}  expected {r['expected']:<8} got {r['got']}")
+        for d in r["differences"]:
+            print(f"        - {d}")
+        if not r["ok"] and r["reasoning"]:
+            print(f"        Claude: {r['reasoning'][:160]}")
+        if r["flags"] and not r["ok"]:
+            print(f"        Flags: {'; '.join(r['flags'])[:160]}")
+    passed = sum(r["ok"] for r in rows)
+    print(f"\n{passed} of {len(rows)} match the demo's expected answers.")
+    if passed < len(rows):
+        print("A DIFF isn't always wrong: read Claude's reasoning, then tune the prompt or the sample item.")
+
+
 def cmd_seed_sandbox(args) -> None:
     from mandate.paypal import PayPalError
 
@@ -157,6 +185,8 @@ def main(argv=None) -> None:
     check = sub.add_parser("check", help="show which AI and PayPal will be used")
     check.add_argument("--ai", action="store_true", help="also make one small model call")
     check.set_defaults(fn=cmd_check)
+    sub.add_parser("check-ai", help="score live Claude on the sample inbox (no PayPal, records untouched)"
+                   ).set_defaults(fn=cmd_check_ai)
     seed = sub.add_parser("seed-sandbox", help="put the sample sales and invoice into the PayPal sandbox")
     seed.add_argument("--port", type=int, default=8600)
     seed.set_defaults(fn=cmd_seed_sandbox)

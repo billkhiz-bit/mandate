@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mandate · Lark Lane Studio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Literata:opsz,wght@7..72,400;7..72,500&family=Mrs+Saint+Delafield&family=Public+Sans:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ag-grid-community@32.3.3/styles/ag-grid.min.css"
+      integrity="sha384-SbhjRoUEm8bfVLFNPeVworVkRbtaGst9P6hJzdcV1qCc7ZOlczNvR1N/Oqn1BW5i" crossorigin="anonymous">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ag-grid-community@32.3.3/styles/ag-theme-quartz.min.css"
+      integrity="sha384-k+VFdTaTGNiZqd5SRnN/BN+mfuc6y8vl3IN/Tuq7XBJVm6CjtJhiC23Ebr/X0/em" crossorigin="anonymous">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="bar">
+  <div class="brand">
+    <span class="mark" aria-hidden="true">M</span>
+    <div>
+      <h1>Mandate</h1>
+      <p class="firm" id="firm">Lark Lane Studio Ltd</p>
+    </div>
+  </div>
+  <div class="modes" aria-label="Connections">
+    <span class="mode" id="mode-ai">AI</span>
+    <span class="mode" id="mode-paypal">PayPal</span>
+  </div>
+  <div class="bar-actions">
+    <button class="btn quiet" id="reset" type="button">Start over</button>
+    <button class="btn primary" id="run" type="button">Read the inbox</button>
+  </div>
+</header>
+
+<main class="layout">
+  <aside class="side">
+    <section class="sheet" aria-labelledby="mandate-title">
+      <div class="sheet-head">
+        <h2 id="mandate-title">The mandate</h2>
+        <button class="link" id="edit" type="button">Edit wording</button>
+      </div>
+      <p class="sheet-intro">What Mandate may do on PayPal without asking. Anything else waits for you.</p>
+      <ol class="clauses" id="clauses"></ol>
+      <p class="cap" id="cap"></p>
+      <div class="signed">
+        <span class="signature" id="signature">Ben Hale</span>
+        <span class="signed-by" id="signed-by">Ben Hale, director</span>
+      </div>
+
+      <form class="editor" id="editor" hidden>
+        <label for="mandate-text">Write it the way you'd say it to a bookkeeper</label>
+        <textarea id="mandate-text" rows="8" spellcheck="true"></textarea>
+        <div class="editor-actions">
+          <button class="btn quiet" type="button" id="edit-cancel">Cancel</button>
+          <button class="btn primary" type="submit" id="compile">Read it with Claude</button>
+        </div>
+        <div class="draft" id="draft" hidden>
+          <p class="draft-title">Claude read it as:</p>
+          <ol class="clauses compact" id="draft-rules"></ol>
+          <ul class="unclear" id="draft-unclear"></ul>
+          <button class="btn primary" type="button" id="use-draft">Use these rules</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="inbox" aria-labelledby="inbox-title">
+      <h2 id="inbox-title">Inbox</h2>
+      <ul class="items" id="inbox"></ul>
+    </section>
+  </aside>
+
+  <div class="work">
+    <section class="panel waiting" aria-labelledby="queue-title">
+      <div class="panel-head">
+        <h2 id="queue-title">Waiting for you</h2>
+        <span class="count" id="queue-count">0</span>
+      </div>
+      <div id="queue-grid" class="ag-theme-quartz grid"></div>
+      <p class="empty" id="queue-empty">Nothing is waiting. Anything outside the mandate will appear here.</p>
+      <article class="detail" id="detail" hidden aria-live="polite">
+        <p class="detail-summary" id="detail-summary"></p>
+        <ul class="checks" id="detail-checks"></ul>
+        <div class="ai-note">
+          <p class="ai-label">What the AI read</p>
+          <p id="detail-reasoning"></p>
+          <ul class="flags" id="detail-flags"></ul>
+        </div>
+        <div class="detail-actions">
+          <button class="btn danger" type="button" id="decline">Decline</button>
+          <button class="btn primary" type="button" id="approve">Approve and send</button>
+        </div>
+      </article>
+    </section>
+
+    <section class="panel" aria-labelledby="activity-title">
+      <div class="panel-head">
+        <h2 id="activity-title">What Mandate did</h2>
+        <p class="hint">Select a row to see the line of the mandate that allowed it.</p>
+      </div>
+      <div id="activity-grid" class="ag-theme-quartz grid"></div>
+      <p class="empty" id="activity-empty">Nothing yet. Read the inbox to start.</p>
+    </section>
+
+    <section class="panel" aria-labelledby="books-title">
+      <div class="panel-head">
+        <h2 id="books-title">Books</h2>
+        <p class="hint">Every PayPal action, posted to UK accounts in GBP. Fixed demo exchange rates.</p>
+      </div>
+      <div id="books-grid" class="ag-theme-quartz grid"></div>
+    </section>
+  </div>
+</main>
+
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+<script src="https://cdn.jsdelivr.net/npm/ag-grid-community@32.3.3/dist/ag-grid-community.min.noStyle.js"
+        integrity="sha384-etrB9TIL7zKiOhcZpa4qlQsXHG1KuuQK1DiRggK05MVgseANVPTFaEs1qUCcs7uG" crossorigin="anonymous"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>

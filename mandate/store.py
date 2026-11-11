@@ -58,10 +58,15 @@ class Store:
     def reset(self, today: date) -> None:
         if self.path.exists():
             self.path.replace(self.path.with_name(self.path.name + ".bak"))
+        rev = self.state.get("rev", 0)
         self.state = self._fresh(today)
+        self.state["rev"] = rev  # keeps counting up, so an open page sees the reset as new
         self.save()
 
     def save(self) -> None:
+        # A revision number, so an open dashboard can tell something changed (for example
+        # a request from another agent) without comparing the whole state.
+        self.state["rev"] = self.state.get("rev", 0) + 1
         self.path.parent.mkdir(parents=True, exist_ok=True)
         fd, tmp = tempfile.mkstemp(dir=self.path.parent, prefix=".state-", suffix=".json")
         try:

@@ -39,10 +39,16 @@ queue with the reasons. Every payment, refund and invoice is posted to UK accoun
   payment; neither can push one through alone.
 * **PayPal** (`mandate/paypal.py`) is called through its REST APIs on the sandbox. Every call that moves
   money carries a `PayPal-Request-Id` built from Mandate's own action id, so a retry can never pay twice.
+  A payout isn't treated as final when PayPal accepts it: the dashboard checks its status again for a few
+  minutes afterwards and whenever the page opens, and a payout that fails or comes back is reversed in the
+  books, so the job shows unpaid again.
 * **The books** (`mandate/books.py`) post each action to UK nominal codes from the open-source
   [`uk-chart-of-accounts`](https://pypi.org/project/uk-chart-of-accounts/) library. Invoices get the VAT
   treatment a UK firm needs (`mandate/vat.py`): UK VAT for UK clients, the reverse-charge wording for EU
-  businesses, outside the scope for other overseas businesses.
+  businesses, outside the scope for other overseas businesses. The journal downloads as a CSV for the
+  firm's accountant.
+* **Other AI agents** (`mandate/mcp_server.py`) can ask Mandate for PayPal actions through MCP. Their
+  requests go through the same mandate and the same queue (see below).
 
 ## What uses PayPal, and what uses AI
 
@@ -54,6 +60,7 @@ queue with the reasons. Every payment, refund and invoice is posted to UK accoun
 | Chase an overdue invoice | Invoicing v2 (remind) | Claude reads the invoice alert |
 | Spot a scam | Nothing is sent to PayPal | Claude flags impersonation, urgency, unknown payees |
 | Write the rules | | Claude turns plain English into checkable rules |
+| Another agent asks for a payment | The same PayPal calls, only within the mandate | Any MCP client (Claude Desktop, Claude Code, your own agent) asks; Mandate decides |
 | Sample sales for the demo | Orders v2 (create and capture) | |
 
 Model: Claude Opus 5.5 (`claude-opus-5-5`) through the Anthropic API, with structured outputs. It can also run
@@ -91,13 +98,58 @@ This build refuses to talk to live PayPal: `LivePayPal` accepts only the sandbox
 
 Things the sandbox does that are easy to mistake for bugs (from PayPal's API reference):
 
-* A new payout batch reports `PENDING`; that is never its final state. A payout to an email with no
-  sandbox account ends `UNCLAIMED`.
+* A new payout batch reports `PENDING`; that is never its final state, so the activity list shows the
+  latest status each time the dashboard checks. A payout to an email with no sandbox account stays
+  `UNCLAIMED`, and PayPal returns the money after 30 days if no one claims it.
 * A EUR payout from a GBP-only sandbox business account can fail with `NON_HOLDING_CURRENCY`; add a EUR
   balance to the sandbox account if it does.
 * PayPal sends its own wording for invoice reminders, and allows two a day per invoice.
 * Re-running the demo: `python app.py reset`, then `seed-sandbox` again, because each refund needs a fresh
   captured sale.
+
+## Let other AI agents ask it (MCP)
+
+More and more agents will be able to pay for things. Mandate can stand in front of PayPal for all of
+them: `python app.py mcp` is an MCP server that any MCP client can use to ask for a payout, refund,
+invoice or reminder. Each request appears in the dashboard's inbox under the agent's name and goes
+through the same mandate and the same queue as everything else. The agent can read the rules, ask, and
+check what happened. No tool lets it approve, decline or change the rules: those stay with the owner.
+
+1. Start the dashboard: `python app.py serve`.
+2. Add Mandate to your client. In Claude Code:
+
+   ```bash
+   claude mcp add mandate -- python /path/to/mandate/app.py mcp
+   ```
+
+   In Claude Desktop, open Settings > Developer > Edit Config and add:
+
+   ```json
+   {"mcpServers": {"mandate": {"command": "python", "args": ["C:\\path\\to\\mandate\\app.py", "mcp"]}}}
+   ```
+
+3. Ask it, for example, "Invoice Harbour Coffee (C-01) for two days of design at £600 a day" (sent under
+   R3, with UK VAT) or "Pay Apex Supplies £2,400 today" (waits for the owner: no job, new payee, over the
+   limits).
+
+| Tool | What it does |
+|---|---|
+| `read_mandate` | The owner's rules, the daily limit and how much has gone out today |
+| `request_payout` | Pay a freelancer for a job on record (PayPal Payouts) |
+| `request_refund` | Refund a sale on record (PayPal Refunds) |
+| `request_invoice` | Invoice an existing client; Mandate works out the VAT (PayPal Invoicing) |
+| `request_reminder` | Chase an unpaid invoice (PayPal Invoicing) |
+| `check_request` | What became of a request: done, waiting, declined, or failed at PayPal |
+
+`MANDATE_URL` points the server at a dashboard on another port, and `MANDATE_AGENT_NAME` sets the name
+the inbox shows (by default, the name the client gives).
+
+## What this demo leaves out
+
+* The dashboard answers only on this machine (127.0.0.1, with a Host-header check), and anything on the
+  machine can use its approval buttons. A real deployment would put the owner's approvals behind a
+  sign-in.
+* Exchange rates are fixed demo rates, and PayPal's fees aren't posted to the books.
 
 ## The sample firm
 

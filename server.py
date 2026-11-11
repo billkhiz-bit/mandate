@@ -14,7 +14,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from mandate.brain import BrainUnavailable
-from mandate.engine import Engine, summary_of
+from mandate.engine import Engine, proposal_from_agent, summary_of
 from mandate.paypal import PayPalError
 
 WEB_DIR = Path(__file__).parent / "web"
@@ -89,6 +89,13 @@ def make_handler(engine: Engine, port: int):
                     finally:
                         lock.release()
                 return self._json(200, {**cache["state"], "busy": True})
+            if path == "/api/agent/mandate":  # what another agent may read: the rules, not the records
+                if not lock.acquire(timeout=30):
+                    return self._json(503, {"error": "Mandate is busy. Try again in a moment."})
+                try:
+                    return self._json(200, engine.mandate_for_agents())
+                finally:
+                    lock.release()
             name = "index.html" if path in ("/", "/index.html") else path.removeprefix("/static/")
             target = (WEB_DIR / name).resolve()
             if WEB_DIR.resolve() not in target.parents or not target.is_file():
@@ -121,6 +128,12 @@ def make_handler(engine: Engine, port: int):
                         counts = engine.run_inbox(limit=limit)
                         return self._json(200, {"counts": counts, "remaining": engine.remaining(),
                                                 "state": self._state()})
+                    if path == "/api/agent/request":  # another agent asks; the mandate decides
+                        result = engine.request(proposal_from_agent(body), str(body.get("agent", "")))
+                        self._state()  # so a page polling during a run sees it
+                        return self._json(200, {"request": result})
+                    if path == "/api/agent/status":
+                        return self._json(200, {"request": engine.request_status(str(body.get("id", "")))})
                     if path == "/api/refresh-payouts":
                         changed = engine.refresh_payouts()
                         return self._json(200, {"changed": changed, "state": self._state()})

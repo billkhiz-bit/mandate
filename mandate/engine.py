@@ -7,12 +7,15 @@ Everything that stops waits in the owner's approval queue.
 
 from __future__ import annotations
 
+import math
 from datetime import date, datetime, timedelta
 from typing import Callable, Optional
 
+from pydantic import ValidationError
+
 from . import books
 from .brain import Brain, BrainUnavailable, OfflineBrain, Proposal, declined as _for_a_person
-from .money import fmt, to_gbp
+from .money import SUPPORTED, fmt, to_gbp
 from .paypal import PayPal, PayPalError
 from .rules import MONEY_OUT, Decision, Facts, Mandate, evaluate
 from .store import Store
@@ -23,6 +26,52 @@ INVOICE_TERMS_DAYS = 14
 # PayPal returns unclaimed money, so it is checked until it settles.
 PAYOUT_INTERIM = {"", "PENDING", "PROCESSING", "NEW", "ONHOLD", "UNCLAIMED"}
 PAYOUT_FAILED = {"FAILED", "RETURNED", "BLOCKED", "DENIED", "REFUNDED", "REVERSED"}
+
+# What another AI agent may ask for (through MCP), the word the inbox shows for it,
+# and which record its reference points to.
+AGENT_ACTIONS = {"payout": ("Pay", "job"), "refund": ("Refund", "sale"),
+                 "invoice": ("Invoice", "client"), "reminder": ("Chase", "invoice")}
+_AGENT_TEXT = {"reference": 40, "payee_name": 120, "payee_email": 200, "description": 300, "reason": 1000}
+REQUEST_MEANING = {
+    "done": "Done: sent to PayPal within the owner's mandate.",
+    "waiting": "Waiting for the owner, who approves or declines it on the Mandate dashboard. Don't ask again.",
+    "declined": "Declined by the owner. Nothing was sent.",
+    "failed": "PayPal reports the payout failed or came back, so nothing was paid.",
+    "checking": "Still being checked.",
+}
+
+
+def proposal_from_agent(data: dict) -> Proposal:
+    """Turn another agent's request into a proposal, or say plainly what is wrong with it.
+    The agent's words are data for the checks, never a decision: the mandate still decides."""
+    action = data.get("action")
+    if action not in AGENT_ACTIONS:
+        raise ValueError("action must be payout, refund, invoice or reminder.")
+    text = {k: " ".join(str(data.get(k) or "").split())[:n] for k, n in _AGENT_TEXT.items()}
+    if not text["reference"]:
+        raise ValueError(f"reference is required: the {AGENT_ACTIONS[action][1]} id from the firm's records.")
+
+    def number(key: str, default: float) -> float:
+        value = data.get(key, default)
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+            raise ValueError(f"{key} must be a number.")
+        return float(value)
+
+    amount = 0.0 if action == "reminder" else round(number("amount", 0.0), 2)
+    currency = str(data.get("currency") or "GBP").upper()
+    if currency not in SUPPORTED:
+        raise ValueError(f"currency must be one of {', '.join(SUPPORTED)}.")
+    flags = data.get("risk_flags") or []
+    if not isinstance(flags, list):
+        raise ValueError("risk_flags must be a list of short notes.")
+    try:
+        return Proposal(action=action, reference=text["reference"], payee_name=text["payee_name"],
+                        payee_email=text["payee_email"], amount=amount, currency=currency,
+                        description=text["description"], quantity=number("quantity", 1.0),
+                        unit_amount=round(number("unit_amount", amount), 2), reasoning=text["reason"],
+                        risk_flags=[" ".join(str(f).split())[:200] for f in flags[:5]])
+    except ValidationError as exc:
+        raise ValueError(f"That request isn't one Mandate can read ({exc.error_count()} problems).") from None
 
 
 class Engine:
@@ -105,7 +154,11 @@ class Engine:
             raise  # bad key, no network: stop the run and leave the item new, to retry once fixed
         except Exception as exc:  # noqa: BLE001 - anything else leaves this item for a person
             proposal = _for_a_person(f"The AI couldn't read this item ({exc.__class__.__name__}), so it waits for you.")
+        return self._decide(event, proposal)
 
+    def _decide(self, event: dict, proposal: Proposal) -> str:
+        """Check one proposal against the mandate, then act on PayPal or queue it for the owner.
+        The same path whether the proposal came from reading the inbox or from another agent."""
         if proposal.action == "none":
             if proposal.risk_flags:  # declined, cut off or unreadable: never let it vanish
                 note = proposal.reasoning or proposal.risk_flags[0]
@@ -151,13 +204,59 @@ class Engine:
                                   "client_name": self.s["clients"].get(inv["client"], {}).get("name", "")}
         return records
 
+    # -- requests from other AI agents (MCP) ----------------------------------
+    def request(self, proposal: Proposal, agent: str) -> dict:
+        """Another agent asks for one PayPal action. It arrives in the inbox under the agent's
+        name and goes through the same mandate and the same queue as everything else: the
+        agent can ask, and see what happened, but only the owner can approve."""
+        if proposal.action not in AGENT_ACTIONS:
+            raise ValueError("Ask for a payout, refund, invoice or reminder.")
+        verb, record = AGENT_ACTIONS[proposal.action]
+        agent = " ".join(str(agent).split())[:60] or "An AI agent"
+        what = (f"invoice {proposal.reference}" if proposal.action == "reminder"
+                else f"{proposal.payee_name or proposal.reference} {fmt(proposal.amount, proposal.currency)}")
+        number = 1 + sum(1 for e in self.s["inbox"] if e["id"].startswith("M"))
+        event = {"id": f"M{number}", "received": f"{self.today().isoformat()} {datetime.now():%H:%M}",
+                 "source": f"{agent} (MCP)", "from": agent, "subject": f"{verb} {what}",
+                 "refs": {record: proposal.reference}, "body": proposal.reasoning, "status": "checking"}
+        self.s["inbox"].append(event)  # not "new": reading the inbox must never hand it to the AI
+        self._decide(event, proposal)
+        self.store.save()
+        return self.request_status(event["id"])
+
+    def request_status(self, request_id: str) -> dict:
+        """What became of an agent's request. Only requests are visible this way, not the inbox."""
+        event = next((e for e in self.s["inbox"] if e["id"] == request_id and e["id"].startswith("M")), None)
+        if event is None:
+            raise KeyError(f"No request {request_id}")
+        last = ([a for a in self.s["activity"] if a["event_id"] == request_id]
+                or [q for q in self.s["queue"] if q["event_id"] == request_id] or [{}])[-1]
+        status = "failed" if last.get("outcome") == "Failed" else event["status"]
+        return {"request_id": request_id, "status": status, "meaning": REQUEST_MEANING.get(status, ""),
+                "summary": last.get("summary", ""), "decided_by": last.get("decided_by", ""),
+                "checks": [f"{'passed' if c['ok'] else 'failed'}: {c['label']}" for c in last.get("checks", [])],
+                "paypal_id": last.get("paypal_id", ""), "paypal_status": last.get("paypal_status", "")}
+
+    def mandate_for_agents(self) -> dict:
+        """The owner's rules as another agent sees them, with what is left of today's limit."""
+        m = self.mandate()
+        return {"firm": self.s["firm"], "rules": [f"{r.id}: {r.text}" for r in m.rules],
+                "daily_limit_gbp": m.daily_cap_gbp, "sent_today_gbp": round(self._sent_today(), 2),
+                "how_it_works": ("Ask with the request tools. Mandate checks each request against these rules "
+                                 "and the firm's records. Allowed requests go to PayPal at once; anything else "
+                                 "waits for the owner. You can't approve or change the rules.")}
+
     # -- facts come from records, never from the AI ------------------------
+    def _sent_today(self) -> float:
+        """Money out today (payouts and refunds that went through), for the daily limit."""
+        today = self.today().isoformat()
+        return sum(a["amount_gbp"] for a in self.s["activity"]
+                   if a["kind"] in MONEY_OUT and a["outcome"] == "Done" and a["date"] == today)
+
     def _facts(self, p: Proposal) -> Facts:
         today = self.today()
         amount_gbp = to_gbp(p.amount, p.currency)
-        out_today = sum(a["amount_gbp"] for a in self.s["activity"]
-                        if a["kind"] in MONEY_OUT and a["outcome"] == "Done" and a["date"] == today.isoformat())
-        base = dict(amount_gbp=amount_gbp, money_out_today_gbp=out_today)
+        base = dict(amount_gbp=amount_gbp, money_out_today_gbp=self._sent_today())
         email = p.payee_email.strip().lower()
         live = self.paypal.mode != "offline"
 
@@ -401,5 +500,5 @@ def summary_of(state: dict, brain_name: str, paypal_mode: str, today: Optional[d
         "firm": state["firm"], "owner": state["owner"], "mandate": state["mandate"], "inbox": inbox,
         "activity": state["activity"], "queue": [q for q in state["queue"] if q["outcome"] == "Waiting"],
         "journal": state["journal"], "ai": brain_name, "paypal": paypal_mode,
-        "today": (today or date.today()).isoformat(),
+        "today": (today or date.today()).isoformat(), "rev": state.get("rev", 0),
     }

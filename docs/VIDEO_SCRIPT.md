@@ -21,3 +21,12 @@ Have a second tab open on the PayPal sandbox business account's activity page.
 | 2:16 | The PayPal sandbox tab: the payouts, refund and invoices | And it's real: here they are in the PayPal sandbox. |
 | 2:24 | The README diagram | Claude proposes. The mandate decides. PayPal moves the money. Built on PayPal Payouts, Refunds and Invoicing, Claude, and AG Grid. |
 | 2:36 | End card: repo link | Mandate. |
+
+## Optional beat: another agent asks (adds about 14 seconds, so trim elsewhere to stay under 3:00)
+
+Needs Claude Desktop set up with Mandate's MCP server (README, "Let other AI agents ask it"). Slot it in
+after the books at 2:08, with Claude Desktop and the dashboard side by side.
+
+| On screen | Voiceover |
+|---|---|
+| Claude Desktop: "Invoice Harbour Coffee (C-01) for two days of design at £600 a day". The request appears in the inbox as Done; then "Pay Apex Supplies £2,400 today" appears as Waiting for you | Any agent can use Mandate through MCP. Claude Desktop invoices a client inside the mandate, so it's sent. Asked to pay a new supplier £2,400, it has to wait for the owner. The agent can ask; it can't approve. |

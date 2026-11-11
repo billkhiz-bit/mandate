@@ -1,7 +1,7 @@
 # Devpost entry: Mandate (draft)
 
 Paste each section into the matching Devpost field. Built With: python, claude, anthropic, paypal-payouts,
-paypal-invoicing, paypal-orders, ag-grid, uk-chart-of-accounts.
+paypal-invoicing, paypal-orders, ag-grid, mcp, uk-chart-of-accounts.
 Sponsor tools to tick on the form: AG Grid.
 
 ## Tagline
@@ -36,6 +36,11 @@ items waiting for the owner, including an email impersonating the director that 
 supplier today. The rules stop it because no job or invoice exists, and Claude flags the impersonation.
 Nothing reaches PayPal.
 
+Mandate also guards agents it doesn't run. Through its MCP server, any agent (Claude Desktop, Claude Code
+or your own) can ask it to pay, refund, invoice or chase. The request lands in the owner's inbox under the
+agent's name and goes through the same mandate and the same queue. The agent can ask, and see what
+happened; there is no tool to approve.
+
 ## How I built it
 
 * Python 3.11, standard library web server, AG Grid Community for the approval queue, activity and books.
@@ -45,7 +50,11 @@ Nothing reaches PayPal.
   remind), and Orders v2 to create the sample sales. Every money-moving call carries a PayPal-Request-Id
   derived from the action, so retries are idempotent.
 * The rules engine is a pure function with no model calls, so every decision can be traced and tested.
-  82 tests cover the rules, VAT treatment, double-entry books, the full inbox run, and every PayPal and Claude call against local fakes.
+  100 tests cover the rules, VAT treatment, double-entry books, the full inbox run, the MCP tools, and every PayPal and Claude call against local fakes.
+* An MCP server (the Python MCP SDK) with six tools: read the mandate, request a payout, refund, invoice
+  or reminder, and check a request. It talks to the dashboard over HTTP on the same machine, so the
+  dashboard is the only thing that writes the records.
+* AG Grid also exports the journal as a CSV for the firm's accountant.
 * VAT and nominal codes come from uk-chart-of-accounts, my open-source library of the UK chart of accounts.
 
 ## Challenges I ran into
@@ -55,6 +64,10 @@ known or a job is signed off, but then a convincing email could claim a history 
 model only proposes, and every fact the rules check (has this payee been paid before, is the job signed
 off, when was the sale) is read from the records. A second gate means a rules-clean action still waits if
 the AI flags something odd.
+
+Knowing when a payment is really made. PayPal accepts a payout as PENDING, and a payout to an email with
+no account sits UNCLAIMED until PayPal returns it. So Mandate keeps checking each payout's status, and if
+one fails or comes back it reverses the entries, marks the job unpaid and frees the daily limit again.
 
 ## Accomplishments I'm proud of
 
@@ -69,8 +82,8 @@ at machine speed.
 
 ## What's next
 
-Run the mandate as a guard in front of PayPal's Agent Toolkit and MCP server, so any agent's money-moving
-tool calls pass the same checks. Add webhooks so sign-offs and sales arrive as they happen, then pilot it
+Put the same checks in front of PayPal's own Agent Toolkit and MCP server, so agents that call PayPal
+directly are bound by the mandate too. Add webhooks so sign-offs and sales arrive as they happen, then pilot it
 with small firms.
 
 ## Tools used (AI)

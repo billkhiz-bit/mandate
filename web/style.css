@@ -134,7 +134,7 @@ button { font: inherit; }
 .pill.done { background: var(--done-wash); color: var(--done); }
 .pill.waiting { background: var(--wait-wash); color: var(--wait); }
 .pill.declined { background: var(--stop-wash); color: var(--stop); }
-.pill.reading { background: var(--sig-wash); color: var(--sig); }
+.pill.reading, .pill.checking { background: var(--sig-wash); color: var(--sig); }
 
 /* -- panels on the right ---------------------------------------------------- */
 .panel { background: var(--sheet); border: 1px solid var(--rule); border-radius: var(--radius); padding: 16px; display: grid; gap: 12px; min-width: 0; }

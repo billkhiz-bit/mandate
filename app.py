@@ -6,6 +6,8 @@
     python app.py check-ai         score live Claude on the sample inbox (no PayPal, records untouched)
     python app.py seed-sandbox     put the sample sales and overdue invoice into your PayPal sandbox
     python app.py reset            start again from the sample inbox
+    python app.py mcp              let other AI agents ask Mandate for PayPal actions (MCP, stdio);
+                                   the dashboard must be running
 """
 
 from __future__ import annotations
@@ -169,6 +171,13 @@ def cmd_reset(args) -> None:
     print("Back to the sample inbox. In sandbox mode, run seed-sandbox again before reading it.")
 
 
+def cmd_mcp(args) -> None:
+    # stdout carries the MCP protocol here, so nothing on this path may print to it.
+    from mandate.mcp_server import server
+
+    server.run("stdio")
+
+
 def main(argv=None) -> None:
     # Windows consoles default to a legacy code page; names like Tomás and the
     # £ sign need UTF-8 to print correctly.
@@ -191,6 +200,8 @@ def main(argv=None) -> None:
     seed.add_argument("--port", type=int, default=8600)
     seed.set_defaults(fn=cmd_seed_sandbox)
     sub.add_parser("reset", help="start again from the sample inbox").set_defaults(fn=cmd_reset)
+    sub.add_parser("mcp", help="let other AI agents ask Mandate for PayPal actions (needs the dashboard running)"
+                   ).set_defaults(fn=cmd_mcp)
     args = parser.parse_args(argv)
     from mandate.store import StoreError
 

@@ -5,7 +5,7 @@
 const $ = (id) => document.getElementById(id);
 const ACTION = { payout: "Pay", refund: "Refund", invoice: "Invoice", reminder: "Chase", none: "Read" };
 const DONE_VERB = { payout: "Paid", refund: "Refunded", invoice: "Invoiced", reminder: "Chased", none: "Handled" };
-const STATUS = { new: "New", done: "Done", waiting: "Waiting for you", declined: "Declined" };
+const STATUS = { new: "New", done: "Done", waiting: "Waiting for you", declined: "Declined", checking: "Checking" };
 const SYMBOL = { GBP: "£", EUR: "€", USD: "$" };
 
 let state = null;
@@ -136,7 +136,9 @@ const booksGrid = agGrid.createGrid($("books-grid"), {
   columnDefs: [
     { headerName: "Date", field: "date", width: 116 },
     { headerName: "Ref", field: "ref", width: 116 },
-    { headerName: "Code", field: "code", width: 84 },
+    // A nominal code is a label, not a quantity: as "text", the totals row's blank code
+    // isn't shown as "Invalid Number" (AG Grid would infer a number from 6002).
+    { headerName: "Code", field: "code", width: 84, cellDataType: "text" },
     { headerName: "Account", field: "account", flex: 1, minWidth: 170 },
     { headerName: "Debit", field: "debit", width: 120, type: "rightAligned",
       valueFormatter: (p) => (p.value ? money(p.value) : "") },
@@ -174,10 +176,11 @@ function render() {
   $("activity-grid").hidden = activity.length === 0;
 
   booksGrid.setGridOption("rowData", state.journal);
+  $("export-books").hidden = state.journal.length === 0;
   const debit = state.journal.reduce((s, l) => s + l.debit, 0);
   const credit = state.journal.reduce((s, l) => s + l.credit, 0);
   booksGrid.setGridOption("pinnedBottomRowData", state.journal.length
-    ? [{ date: "", ref: "", code: "", account: "Totals", debit, credit, memo: Math.abs(debit - credit) < 0.005 ? "Balanced" : "Out of balance" }]
+    ? [{ date: null, ref: null, code: null, account: "Totals", debit, credit, memo: Math.abs(debit - credit) < 0.005 ? "Balanced" : "Out of balance" }]
     : []);
 }
 
@@ -241,11 +244,15 @@ function renderDetail() {
 }
 
 /* -- actions ---------------------------------------------------------------- */
+let actionsInFlight = 0;  // while this page is acting, it already gets fresh state back
+
 async function withBusy(button, label, fn) {
   const before = button.textContent;
   button.disabled = true;
   button.textContent = label;
+  actionsInFlight += 1;
   try { await fn(); } catch (err) { toast(err.message, true); } finally {
+    actionsInFlight -= 1;
     button.disabled = false;
     button.textContent = before;
   }
@@ -259,6 +266,28 @@ async function load() {
   } catch (err) {
     toast(err.message, true);
   }
+  setTimeout(watchForChanges, 3000);
+}
+
+/* Another AI agent can ask Mandate for something through MCP at any time. While the page
+   is open, check every few seconds and show what arrived. The revision number only goes
+   up, so an older answer can never replace newer state. */
+async function watchForChanges() {
+  if (state && !actionsInFlight && document.visibilityState === "visible") {
+    try {
+      const next = await api("/api/state");
+      if (!next.busy && !actionsInFlight && next.rev > state.rev) {
+        const known = new Set(state.inbox.map((e) => e.id));
+        const arrived = next.inbox.filter((e) => !known.has(e.id) && e.id.startsWith("M"));
+        state = next;
+        render();
+        arrived.forEach((e) => toast(`${e.source}: ${e.subject}. ${e.status === "done"
+          ? "Done within the mandate." : "Waiting for you."}`));
+        schedulePayoutRefresh();
+      }
+    } catch { /* the dashboard may be restarting: try again next time */ }
+  }
+  setTimeout(watchForChanges, 3000);
 }
 
 function markReading() {
@@ -336,6 +365,25 @@ $("decline").addEventListener("click", (e) => withBusy(e.currentTarget, "Declini
   render();
   toast(q.kind === "none" ? "Marked as handled." : "Declined. Nothing was sent.");
 }));
+
+/* The journal as a CSV an accountant can import: plain numbers (no £), no totals row.
+   AG Grid writes it with a UTF-8 byte-order mark, so Excel shows names like Tomás correctly. */
+function journalCsv() {
+  const slug = state.firm.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  return {
+    fileName: `${slug}-journal-${state.today}.csv`,
+    skipPinnedBottom: true,
+    processCellCallback: (p) => {
+      const id = p.column.getColId();
+      if (id === "debit" || id === "credit") return p.value ? Number(p.value).toFixed(2) : "";
+      return p.value ?? "";
+    },
+  };
+}
+$("export-books").addEventListener("click", () => {
+  booksGrid.exportDataAsCsv(journalCsv());
+  toast("Journal downloaded as CSV.");
+});
 
 let resetArmed = false;
 $("reset").addEventListener("click", (e) => {

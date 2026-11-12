@@ -163,8 +163,11 @@ class LivePayPal:
         body = {"intent": "CAPTURE",
                 "purchase_units": [{"reference_id": reference, "description": description,
                                     "amount": {"currency_code": currency, "value": _money(amount)}}],
+                # The sample sales are digital (a template, a course): NO_SHIPPING stops PayPal asking
+                # the buyer for a delivery address at checkout.
                 "payment_source": {"paypal": {"experience_context": {
-                    "user_action": "PAY_NOW", "return_url": return_url, "cancel_url": return_url}}}}
+                    "user_action": "PAY_NOW", "shipping_preference": "NO_SHIPPING",
+                    "return_url": return_url, "cancel_url": return_url}}}}
         out = self._call("POST", "/v2/checkout/orders", body, request_id=f"order-{reference}-{int(time.time())}")
         link = next((ln["href"] for ln in out.get("links", []) if ln.get("rel") in ("payer-action", "approve")), "")
         return out.get("id", ""), link

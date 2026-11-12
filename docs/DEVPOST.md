@@ -3,6 +3,8 @@
 Paste each section into the matching Devpost field. Built With: python, claude, anthropic, paypal-payouts,
 paypal-invoicing, paypal-orders, ag-grid, mcp, uk-chart-of-accounts.
 Sponsor tools to tick on the form: AG Grid.
+Prizes, if the form asks which to enter: all the general ones, plus Best Use of Agentic Commerce, Best Use of
+PayPal + AI and Best Use of AG Grid (a long shot: that award favours AG Studio, and Mandate uses AG Grid Community).
 
 ## Tagline
 
@@ -12,8 +14,9 @@ An AI agent that pays and gets paid on PayPal, only within rules the owner write
 
 I'm a finance professional at a small UK accountancy practice. Our clients are the firms that will hand
 their PayPal accounts to AI agents first: studios paying freelancers, shops refunding customers, consultants
-invoicing abroad. An agent that can pay is useful. An agent that can be talked into paying by one urgent
-email is a liability. Every business already has the answer on paper: a bank mandate, a scheme of
+invoicing abroad. PayPal's brief for this hackathon asks for agents that actually transact, such as an
+assistant that pays contractors when a job is marked complete. That agent is useful. An agent that can be
+talked into paying by one urgent email is a liability. Every business already has the answer on paper: a bank mandate, a scheme of
 delegation, "anything over £500, ask me". Mandate makes that piece of paper executable.
 
 ## What it does
@@ -39,7 +42,8 @@ Nothing reaches PayPal.
 Mandate also guards agents it doesn't run. Through its MCP server, any agent (Claude Desktop, Claude Code
 or your own) can ask it to pay, refund, invoice or chase. The request lands in the owner's inbox under the
 agent's name and goes through the same mandate and the same queue. The agent can ask, and see what
-happened; there is no tool to approve.
+happened; there is no tool to approve. For agent-to-agent commerce, that makes Mandate the checkpoint
+between another agent's request and the business's money.
 
 ## How I built it
 

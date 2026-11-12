@@ -47,6 +47,9 @@ queue with the reasons. Every payment, refund and invoice is posted to UK accoun
   treatment a UK firm needs (`mandate/vat.py`): UK VAT for UK clients, the reverse-charge wording for EU
   businesses, outside the scope for other overseas businesses. The journal downloads as a CSV for the
   firm's accountant.
+* **The dashboard** (`web/`, served by `server.py`) uses **AG Grid Community**, one of the hackathon's
+  sponsor tools, for the approval queue, the activity list and the books, and for the CSV export of the
+  journal.
 * **Other AI agents** (`mandate/mcp_server.py`) can ask Mandate for PayPal actions through MCP. Their
   requests go through the same mandate and the same queue (see below).
 
@@ -65,6 +68,9 @@ queue with the reasons. Every payment, refund and invoice is posted to UK accoun
 
 Model: Claude Opus 5.5 (`claude-opus-5-5`) through the Anthropic API, with structured outputs. It can also run
 on Amazon Bedrock (`MANDATE_AI=bedrock`).
+
+Other tools: AG Grid Community (sponsor tool: the dashboard's grids and CSV export), the Python MCP SDK
+(`mcp`) and `uk-chart-of-accounts` (UK nominal codes and VAT).
 
 ## Run it in two minutes, no keys
 
